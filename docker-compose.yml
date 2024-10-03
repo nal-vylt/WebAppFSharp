@@ -1,0 +1,12 @@
+﻿services:
+  webappfsharp:
+    image: webappfsharp
+    build:
+      context: .
+      dockerfile: WebAppFSharp/Dockerfile
+
+  consoleappfsharp:
+    image: consoleappfsharp
+    build:
+      context: .
+      dockerfile: ConsoleAppFSharp/Dockerfile
