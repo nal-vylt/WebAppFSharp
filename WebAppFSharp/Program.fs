@@ -162,7 +162,7 @@ module RouteHandlers =
                  GET >=> route "/sales" >=> getSalesHandler
                  GET >=> route "/sales/export" >=> exportSalesToExcelHandler ]
 
-let configureApp fetcher (app: IApplicationBuilder) = app.UseGiraffe(RouteHandlers.webApp)
+let configureApp (app: IApplicationBuilder) = app.UseGiraffe(RouteHandlers.webApp)
 
 let configureServices (services: IServiceCollection) =
     services
