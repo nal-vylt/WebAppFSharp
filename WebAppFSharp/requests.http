@@ -1,5 +1,26 @@
-GET http://localhost:2799
+GET http://localhost:2799/
+
+### Variables
+@id = d7531bee-8f45-4857-ac0b-cb5349e18243
+@employeeId = E-02
+@revenue = 1000
+@cost = 500
+@profit = 500
+
+### Get sales by Id
+GET http://localhost:2799/employees/{{employeeId}}/sales/{{id}}
+
+
+### Crete new sale
+POST http://localhost:2799/employees/{{employeeId}}/sales
+Content-Type: application/json
+Accept: application/json
+
+{
+    "revenue": {{revenue}},
+    "cost": {{cost}},
+    "profit": {{profit}}
+}
+
 
 ###
-
-GET http://localhost:2799/vy/lists

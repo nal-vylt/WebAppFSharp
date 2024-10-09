@@ -1,16 +1,12 @@
 module Domain
 
-type Status =
-    | Todo
-    | Doing
-    | Done
-    
-type TodoList = {
-    Name : string
-    Description : string
-    Status : Status
-    PercentageDone : decimal    
-}
+open System
 
-
-type ListFetcher = string -> TodoList list
+type Sale =
+    {
+      id: Guid
+      employeeId: string
+      revenue: decimal
+      cost: decimal
+      profit: decimal
+    }
