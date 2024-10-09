@@ -1,7 +1,5 @@
 module Application
 
-open System.Collections.Generic
-
 let setSpreadsheetGearLicense() =
         try
             SpreadsheetGear.Factory.SetSignedLicense("")

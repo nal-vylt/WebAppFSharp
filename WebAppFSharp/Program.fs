@@ -1,7 +1,6 @@
 module WebAppFSharp
 
 open System
-open System.IO
 open Microsoft.AspNetCore.Builder
 open Microsoft.AspNetCore.Hosting
 open Microsoft.AspNetCore.Http
@@ -20,24 +19,16 @@ let jsonOptions =
     let options = SystemTextJson.Serializer.DefaultOptions
     options.Converters.Add(JsonFSharpConverter(JsonUnionEncoding.FSharpLuLike))
     options
-
-let getCosmosDb (configuration: IConfiguration) : CosmosDb =
-    {
-        ConnectionString = configuration.["CosmosDb:ConnectionString"]
-        DatabaseId = configuration.["CosmosDb:DatabaseId"]
-        ContainerId = "" 
-    }
     
 module RouteHandlers =
     let getSaleByIdHandler (employeeId, id) : HttpHandler =
         fun (next: HttpFunc) (ctx: HttpContext) ->
-            let configuration = ctx.GetService<IConfiguration>()
-            let cosmosDb = getCosmosDb configuration
+            let cosmosClient = ctx.GetService<CosmosClient>()
             
             task {
-                let! result =
-                    SaleRepository.getSaleByIdAsync cosmosDb employeeId id
-                match result with
+                let! saleItem =
+                    SaleRepository.getSaleByIdAsync cosmosClient employeeId id
+                match saleItem with
                     | Some s ->
                         ctx.SetStatusCode 200
                         return! json s next ctx
@@ -48,8 +39,7 @@ module RouteHandlers =
     type CreateSaleRequest =  { revenue: decimal; cost: decimal; profit: decimal }
     let createSaleHandler employeeId : HttpHandler =
         fun (next: HttpFunc) (ctx: HttpContext) ->
-            let configuration = ctx.GetService<IConfiguration>()
-            let cosmosDb = getCosmosDb configuration
+            let cosmosClient = ctx.GetService<CosmosClient>()
             
             task {
                 try
@@ -61,7 +51,7 @@ module RouteHandlers =
                         cost = request.cost
                         profit = request.profit }
                     let! result =
-                        SaleRepository.createSaleAsync cosmosDb sale
+                        SaleRepository.createSaleAsync cosmosClient sale
                     return! Successful.CREATED result next ctx
                 with
                 | :? JsonException ->
@@ -73,13 +63,12 @@ module RouteHandlers =
     type UpdateSaleRequest =  { revenue: decimal; cost: decimal; profit: decimal }
     let updateSaleHandler (employeeId, id) : HttpHandler =
         fun (next: HttpFunc) (ctx: HttpContext) ->
-            let configuration = ctx.GetService<IConfiguration>()
-            let cosmosDb = getCosmosDb configuration
+            let cosmosClient = ctx.GetService<CosmosClient>()
             
             task {
                 try
                     let! request = ctx.BindJsonAsync<UpdateSaleRequest>()
-                    let! isExistedSale = SaleRepository.isExistedSaleAsync cosmosDb employeeId id
+                    let! isExistedSale = SaleRepository.isExistedSaleAsync cosmosClient employeeId id
                     if isExistedSale = false then
                         return! RequestErrors.NOT_FOUND $"Sale not found: {string id}" next ctx  
                     else
@@ -89,7 +78,7 @@ module RouteHandlers =
                             revenue = request.revenue
                             cost = request.cost
                             profit = request.profit }
-                        let! result = SaleRepository.updateSaleAsync cosmosDb sale
+                        let! result = SaleRepository.updateSaleAsync cosmosClient sale
                         return! Successful.OK result next ctx
                 with
                 | :? JsonException ->
@@ -100,12 +89,11 @@ module RouteHandlers =
             
     let deleteSaleHandler (employeeId, id) : HttpHandler =
          fun (next: HttpFunc) (ctx: HttpContext) ->
-             let configuration = ctx.GetService<IConfiguration>()
-             let cosmosDb = getCosmosDb configuration
+             let cosmosClient = ctx.GetService<CosmosClient>()
              
              task {
                  try
-                     let! result = SaleRepository.deleteSaleAsync cosmosDb employeeId id
+                     let! result = SaleRepository.deleteSaleAsync cosmosClient employeeId id
                      if result = false then
                          return! RequestErrors.NOT_FOUND $"Sale not found: {string id}" next ctx
                      else return! Successful.OK result next ctx
@@ -116,8 +104,7 @@ module RouteHandlers =
     
     let getSalesHandler : HttpHandler =
         fun (next: HttpFunc) (ctx: HttpContext) ->
-            let configuration = ctx.GetService<IConfiguration>()
-            let cosmosDb = getCosmosDb configuration
+            let cosmosClient = ctx.GetService<CosmosClient>()
             let limitQueryParam = ctx.TryGetQueryStringValue "limit"
             let limit =
                 match limitQueryParam with
@@ -128,13 +115,12 @@ module RouteHandlers =
                 | None -> None
             
             task {
-                let! result = SaleRepository.getAllSalesAsync cosmosDb limit |> Async.AwaitTask
+                let! result = SaleRepository.getAllSalesAsync cosmosClient limit |> Async.AwaitTask
                 return! Successful.OK result next ctx
             }
     let exportSalesToExcelHandler : HttpHandler =
         fun (next: HttpFunc) (ctx: HttpContext) ->
-            let configuration = ctx.GetService<IConfiguration>()
-            let cosmosDb = getCosmosDb configuration
+            let cosmosClient = ctx.GetService<CosmosClient>()
             let excelTemplatePath = "template.xlsx"
             let limitQueryParam = ctx.TryGetQueryStringValue "limit"
             let limit =
@@ -147,15 +133,14 @@ module RouteHandlers =
                 
             task {
                 try
-                    // Fetch sales records from the database
-                    let! sales = SaleRepository.getAllSalesAsync cosmosDb limit |> Async.AwaitTask
+                    // Fetch sales records
+                    let! sales = SaleRepository.getAllSalesAsync cosmosClient limit |> Async.AwaitTask
 
                     if sales.Count = 0 then
                         return! RequestErrors.NOT_FOUND "No sales found." next ctx
                     else
                         let! excelStream = ConvertToExcel.generateExcelFileAsync sales excelTemplatePath
                         
-                        // Return file as a stream
                         // Set the response headers
                         ctx.Response.ContentType <- "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         ctx.Response.Headers.Add("Content-Disposition", "attachment; filename=sales_report.xlsx")
@@ -183,6 +168,9 @@ let configureServices (services: IServiceCollection) =
     services
         .AddGiraffe()
         .AddSingleton<Json.ISerializer>(SystemTextJson.Serializer(jsonOptions))
+        .AddSingleton<CosmosClient>(fun provider ->
+            let configuration = provider.GetService<IConfiguration>()
+            new CosmosClient(configuration.["CosmosDb:ConnectionString"]))
     |> ignore
 
 let configure (webHostBuilder: IWebHostBuilder) =

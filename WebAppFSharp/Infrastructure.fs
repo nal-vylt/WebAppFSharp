@@ -5,76 +5,72 @@ open Microsoft.Azure.Cosmos
 open Domain
 open System.Threading.Tasks
 open System.Collections.Generic
-
-type CosmosDb =
-    {
-        ConnectionString: string
-        ContainerId: string
-        DatabaseId: string
-    }
     
 module SaleRepository =
-    let getContainer (cosmosDb: CosmosDb) =
-        let cosmosClient = new CosmosClient(cosmosDb.ConnectionString)
-        cosmosClient.GetContainer(cosmosDb.DatabaseId, "Sale")
-        
-    let createSaleAsync (cosmosDb: CosmosDb) (sale: Sale) : Task<Sale> =
+    let getContainer (cosmosClient: CosmosClient) =
+        cosmosClient.GetDatabase("Sales").GetContainer("Sale")
+    let createSaleAsync (cosmosClient: CosmosClient) (sale: Sale) : Task<Sale> =
         async {
-            let container = getContainer(cosmosDb)
+            let container = getContainer(cosmosClient)
             let! saleItem =
                 container.CreateItemAsync(sale, PartitionKey(sale.employeeId)) |> Async.AwaitTask
-                
             return saleItem.Resource
         } |> Async.StartAsTask
     
-    let getSaleByIdAsync (cosmosDb: CosmosDb) (employeeId: string) (id: Guid) : Task<Sale option> =
+    let getSaleByIdAsync (cosmosClient: CosmosClient)
+        (employeeId: string)
+        (id: Guid) : Task<Sale option> =
         async {
             try
-                let container = getContainer(cosmosDb)
+                let container = getContainer(cosmosClient)
                 let! itemResponse =
                     container.ReadItemAsync<Sale>(id.ToString(), PartitionKey(employeeId)) |> Async.AwaitTask
                 return Some itemResponse.Resource
             with
-            | ex -> return None
+            | _ -> return None
         } |> Async.StartAsTask
 
-    let isExistedSaleAsync (cosmosDb: CosmosDb) (employeeId: string) (id: Guid) : Task<bool> =
+    let isExistedSaleAsync (cosmosClient: CosmosClient)
+        (employeeId: string)
+        (id: Guid) : Task<bool> =
         async {
             try
-                let container = getContainer(cosmosDb)
+                let container = getContainer(cosmosClient)
                 let! _ =
                     container.ReadItemAsync<Sale>(id.ToString(), PartitionKey(employeeId)) |> Async.AwaitTask
                 return true
             with
-            | :? CosmosException as ex when ex.StatusCode = System.Net.HttpStatusCode.NotFound -> return false
-            | ex -> return! Task.FromException<bool>(ex) |> Async.AwaitTask
+            | _ -> return false
         } |> Async.StartAsTask
     
-    let updateSaleAsync (cosmosDb: CosmosDb) (sale: Sale) : Task<Sale option> =
+    let updateSaleAsync (cosmosClient: CosmosClient)
+        (sale: Sale) : Task<Sale option> =
         async {
             try
-                let container = getContainer(cosmosDb)
+                let container = getContainer(cosmosClient)
                 let! itemResponse = container.UpsertItemAsync(sale, PartitionKey(sale.employeeId)) |> Async.AwaitTask
                 return Some itemResponse.Resource
             with
-            | :? CosmosException as ex when ex.StatusCode = System.Net.HttpStatusCode.NotFound -> return None
+            | _ -> return None
         } |> Async.StartAsTask
 
-    let deleteSaleAsync (cosmosDb: CosmosDb) (employeeId: string) (id: Guid) : Task<bool> =
+    let deleteSaleAsync (cosmosClient: CosmosClient)
+        (employeeId: string)
+        (id: Guid) : Task<bool> =
         async {
             try
-                let container = getContainer(cosmosDb)
+                let container = getContainer(cosmosClient)
                 let! _ =
                     container.DeleteItemAsync<User>(id.ToString(), PartitionKey(employeeId)) |> Async.AwaitTask
                 return true
             with
-            | :? CosmosException as ex when ex.StatusCode = System.Net.HttpStatusCode.NotFound -> return false
-            | ex -> return! Task.FromException<bool>(ex) |> Async.AwaitTask
+            | _ -> return false
         } |> Async.StartAsTask
     
-    let getAllSalesAsync (cosmosDb: CosmosDb) (limit: int option) : Task<List<Sale>> =
+    let getAllSalesAsync (cosmosClient: CosmosClient)
+        (limit: int option) : Task<List<Sale>> =
         async {
-            let container = getContainer(cosmosDb)
+            let container = getContainer(cosmosClient)
             
             let query = 
                 match limit with
