@@ -40,3 +40,12 @@ DELETE http://localhost:2799/employees/{{get-EmployeeId}}/sales/{{id}}
 
 ### Export to excel
 GET http://localhost:2799/sales/export?limit=2
+
+### Search
+POST http://localhost:2799/sales/search
+
+{
+    "employeeId": "E-01",
+    "minRevenue": 100,
+    "maxRevenue": 1000000
+}

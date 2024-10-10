@@ -5,7 +5,32 @@ open Microsoft.Azure.Cosmos
 open Domain
 open System.Threading.Tasks
 open System.Collections.Generic
-    
+open Azure
+open Azure.Search.Documents
+open Azure.Search.Documents.Models
+
+let buildSearchQuery (request: SalesSearchRequest) =
+    let filters = 
+        [ 
+            match request.employeeId with
+            | Some id -> Some $"employeeId eq '%s{id}'"
+            | None -> None
+
+            match request.minRevenue with
+            | Some revenue -> Some $"revenue ge %M{revenue}"
+            | None -> None
+
+            match request.maxRevenue with
+            | Some revenue -> Some $"revenue le %M{revenue}"
+            | None -> None
+        ]
+        |> List.choose id
+
+    if filters.IsEmpty then
+        "" // No filters
+    else
+        String.Join(" and ", filters)
+            
 module SaleRepository =
     let getContainer (cosmosClient: CosmosClient) =
         cosmosClient.GetDatabase("Sales").GetContainer("Sale")
@@ -87,4 +112,41 @@ module SaleRepository =
                 sales.AddRange(response.Resource)
 
             return sales
+        } |> Async.StartAsTask
+        
+    let uploadSalesToSearchIndex (azureSearch: AzureSearchConfig) (sales: List<Sale>)=
+        async {
+            let credential = AzureKeyCredential(azureSearch.ApiKey)
+            let searchClient =
+                SearchClient(Uri(azureSearch.ServiceEndpoint), azureSearch.IndexName, credential)
+            
+            // Upload sales to the index
+            let batch = IndexDocumentsBatch()
+            for sale in sales do
+                let uploadAction = IndexDocumentsAction.Upload sale
+                batch.Actions.Add(uploadAction)
+                
+            // Upload the batch of sales to the search index
+            try
+                let! _ = searchClient.IndexDocumentsAsync(batch) |> Async.AwaitTask
+                return ()
+            with
+            | ex -> raise(ex)
+        } |> Async.StartAsTask
+        
+    let searchSales (azureSearch: AzureSearchConfig) (request: SalesSearchRequest) =
+        async {
+            let credential = AzureKeyCredential(azureSearch.ApiKey)
+            let searchClient = SearchClient(Uri(azureSearch.ServiceEndpoint), azureSearch.IndexName, credential)
+
+            let searchOptions = SearchOptions()
+            let filterQuery = buildSearchQuery request
+            if not (String.IsNullOrEmpty(filterQuery)) then
+                searchOptions.Filter <- filterQuery
+
+            let! searchResults = searchClient.SearchAsync<Sale>("*", searchOptions) |> Async.AwaitTask
+            
+            return 
+                searchResults.Value.GetResults()
+                |> Seq.map (_.Document)
         } |> Async.StartAsTask

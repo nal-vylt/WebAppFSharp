@@ -20,6 +20,13 @@ let jsonOptions =
     options.Converters.Add(JsonFSharpConverter(JsonUnionEncoding.FSharpLuLike))
     options
     
+let getAzureSearchConfig (configuration: IConfiguration) =
+    {
+        ServiceEndpoint = configuration.["AzureSearch:ServiceEndpoint"]
+        ApiKey = configuration.["AzureSearch:ApiKey"]
+        IndexName = configuration.["AzureSearch:IndexName"]
+    }
+    
 module RouteHandlers =
     let getSaleByIdHandler (employeeId, id) : HttpHandler =
         fun (next: HttpFunc) (ctx: HttpContext) ->
@@ -152,6 +159,37 @@ module RouteHandlers =
                 | ex ->
                     return! ServerErrors.INTERNAL_ERROR $"Unexpected error: %s{ex.Message}" next ctx
         }
+    
+    
+    let uploadSalesHandler : HttpHandler =
+        fun (next: HttpFunc) (ctx: HttpContext) ->
+            let cosmosClient = ctx.GetService<CosmosClient>()
+            let configuration = ctx.GetService<IConfiguration>()
+            let azureSearchConfig = getAzureSearchConfig configuration
+            task {
+                let! sales = SaleRepository.getAllSalesAsync cosmosClient None |> Async.AwaitTask
+                
+                // Upload sales data
+                do! SaleRepository.uploadSalesToSearchIndex azureSearchConfig sales
+
+                return! Successful.OK "Data uploaded successfully!" next ctx
+            }
+    
+    let searchSalesHandler : HttpHandler =
+        fun (next: HttpFunc) (ctx: HttpContext) ->
+            let configuration = ctx.GetService<IConfiguration>()
+            let azureSearchConfig = getAzureSearchConfig configuration
+            task {
+                try
+                    let! request = ctx.BindJsonAsync<SalesSearchRequest>()
+                    let! results = SaleRepository.searchSales azureSearchConfig request
+
+                    return! Successful.OK results next ctx
+                with
+                | ex ->
+                    // Return an error response to the client
+                    return! RequestErrors.BAD_REQUEST ex.Message next ctx
+            }
              
     let webApp =
         choose [ route "/" >=> text "Hello Vy"
@@ -160,7 +198,9 @@ module RouteHandlers =
                  PUT >=> routef "/employees/%s/sales/%O" updateSaleHandler
                  DELETE >=> routef "/employees/%s/sales/%O" deleteSaleHandler
                  GET >=> route "/sales" >=> getSalesHandler
-                 GET >=> route "/sales/export" >=> exportSalesToExcelHandler ]
+                 GET >=> route "/sales/export" >=> exportSalesToExcelHandler
+                 POST >=> route "/sales/search" >=> searchSalesHandler
+                 POST >=> route "/sales/data" >=> uploadSalesHandler ]
 
 let configureApp (app: IApplicationBuilder) = app.UseGiraffe(RouteHandlers.webApp)
 
@@ -171,6 +211,7 @@ let configureServices (services: IServiceCollection) =
         .AddSingleton<CosmosClient>(fun provider ->
             let configuration = provider.GetService<IConfiguration>()
             new CosmosClient(configuration.["CosmosDb:ConnectionString"]))
+        .AddTransient 
     |> ignore
 
 let configure (webHostBuilder: IWebHostBuilder) =
